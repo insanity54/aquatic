@@ -17,7 +17,6 @@ ENV ACCESS_LIST_CONTENTS ""
 WORKDIR /etc/aquatic/
 
 COPY --from=builder /usr/src/aquatic/target/release/aquatic_udp /usr/local/bin/aquatic_udp
-COPY --from=builder /usr/src/aquatic/aquatic-udp-config.toml /etc/aquatic/config.toml
 
 COPY <<-"EOT" /usr/local/bin/entrypoint.sh
 #!/bin/bash
