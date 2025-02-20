@@ -1,22 +1,5 @@
 # syntax=docker/dockerfile:1
 
-# aquatic_udp
-#
-# Please note that running aquatic_udp under Docker is NOT RECOMMENDED due to
-# suboptimal performance. This file is provided as a starting point for those
-# who still wish to do so.
-#
-# Customize by setting CONFIG_FILE_CONTENTS and
-# ACCESS_LIST_CONTENTS environment variables.
-#
-# By default runs tracker on port 3000 without info hash access control.
-#
-# Run from repository root directory with:
-# $ DOCKER_BUILDKIT=1 docker build -t aquatic-udp -f docker/aquatic_udp.Dockerfile .
-# $ docker run -it -p 0.0.0.0:3000:3000/udp --name aquatic-udp aquatic-udp
-#
-# Pass --network="host" to run command for much better performance.
-
 FROM rust:latest AS builder
 
 WORKDIR /usr/src/aquatic
@@ -27,22 +10,32 @@ RUN . ./scripts/env-native-cpu-without-avx-512 && cargo build --release -p aquat
 
 FROM debian:stable-slim
 
-ENV CONFIG_FILE_CONTENTS "log_level = 'warn'"
+
+ENV CONFIG_FILE_CONTENTS "[statistics]\ninterval = 5\nprint_to_stdout = true"
 ENV ACCESS_LIST_CONTENTS ""
 
-WORKDIR /root/
+WORKDIR /etc/aquatic/
 
-COPY --from=builder /usr/src/aquatic/target/release/aquatic_udp ./
+COPY --from=builder /usr/src/aquatic/target/release/aquatic_udp /usr/local/bin/aquatic_udp
+COPY --from=builder /usr/src/aquatic/aquatic-udp-config.toml /etc/aquatic/config.toml
 
-# Create entry point script for setting config and access
-# list file contents at runtime
-COPY <<-"EOT" ./entrypoint.sh
+COPY <<-"EOT" /usr/local/bin/entrypoint.sh
 #!/bin/bash
-echo -e "$CONFIG_FILE_CONTENTS" > ./config.toml
-echo -e "$ACCESS_LIST_CONTENTS" > ./access-list.txt
-exec ./aquatic_udp -c ./config.toml "$@"
+echo -e "$CONFIG_FILE_CONTENTS" > /etc/aquatic/config.toml
+echo -e "$ACCESS_LIST_CONTENTS" > /var/lib/aquatic/whitelist
+exec /usr/local/bin/aquatic_udp -c /etc/aquatic/config.toml "$@"
 EOT
 
-RUN chmod +x ./entrypoint.sh
+RUN mkdir -p /var/lib/aquatic && \
+  touch /var/lib/aquatic/whitelist && \
+  chmod 0666 /var/lib/aquatic/whitelist && \
+  chmod +x /usr/local/bin/entrypoint.sh
 
-ENTRYPOINT ["./entrypoint.sh"]
+
+
+HEALTHCHECK --interval=5s --timeout=3s --retries=3 \
+  CMD pidof aquatic_udp || exit 1
+
+## we cd before running to workaround nektos/act behavior which overrides WORKDIR
+ENTRYPOINT ["sh", "-c", "cd /etc/aquatic && /usr/local/bin/entrypoint.sh"]
+# ENTRYPOINT ["tail", "-f", "/dev/null"] # for debugging
